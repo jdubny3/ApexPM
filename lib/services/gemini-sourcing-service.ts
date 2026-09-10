@@ -200,7 +200,14 @@ Return a JSON array of opportunity objects adhering strictly to this JSON format
       return parsed as GeminiOpportunitySchema[];
     }
   } catch (err: any) {
-    console.warn(`[Gemini Sourcing Service] Gemini API call warning: ${err.message}. Using high-conviction verified opportunities.`);
+    if (err.message?.includes("API_KEY_SERVICE_BLOCKED") || err.message?.includes("PERMISSION_DENIED")) {
+      console.warn(`[Gemini Sourcing Service] ⚠️ Gemini API Permission Error (API_KEY_SERVICE_BLOCKED).`);
+      console.warn(`[Gemini Sourcing Service] Fix: Enable the Generative Language API in Google Cloud by running:`);
+      console.warn(`  gcloud services enable generativelanguage.googleapis.com`);
+      console.warn(`Also ensure your API Key under APIs & Services > Credentials allows the "Generative Language API" without HTTP referrer restrictions.`);
+    } else {
+      console.warn(`[Gemini Sourcing Service] Gemini API call warning: ${err.message}. Using high-conviction verified opportunities.`);
+    }
   }
 
   return FALLBACK_OPPORTUNITIES;
