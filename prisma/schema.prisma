@@ -1,0 +1,105 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Company {
+  id                String          @id @default(cuid())
+  name              String          @unique
+  slug              String          @unique
+  logoUrl           String?
+  tier              String          // "TIER_1A", "TIER_1B", "TIER_2"
+  tierLabel         String          // "Tier 1A: Elite AI / Top Tech"
+  hqLocation        String
+  aiFocus           String          // "Frontier AI", "AI-Native Platform", etc.
+  companySize       String
+  techStack         String
+  apmProgramSummary String
+  websiteUrl        String
+  jobs              Job[]
+  alumni            AlumniContact[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+model Job {
+  id              String           @id @default(cuid())
+  title           String
+  slug            String           @unique
+  companyId       String
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location        String           // "New York, NY", "San Francisco, CA", etc.
+  locationTier    String           // "NYC", "BAY_AREA", "OTHER_TIER1", "OTHER"
+  workplaceType   String           @default("HYBRID") // "HYBRID", "ONSITE", "REMOTE"
+  stipend         String?
+  team            String?
+  description     String
+  requirements    String
+  url             String
+  source          String           @default("Direct") // "Greenhouse", "Lever", "Ashby", "Workday", "Direct"
+  deadline        String?
+  status          String           @default("ACTIVE")
+  apexScore       Float            // 0 - 100
+  locationScore   Float            // 0 - 100
+  prestigeScore   Float            // 0 - 100
+  fitScore        Float            // 0 - 100
+  trajectoryScore Float            // 0 - 100
+  evaluation      AgentEvaluation?
+  application     Application?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model AgentEvaluation {
+  id                    String   @id @default(cuid())
+  jobId                 String   @unique
+  job                   Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  eligibilityVerdict    String   // "SOPHOMORE_ELIGIBLE", "RISING_JUNIOR_PREFERRED", "PENULTIMATE_ONLY"
+  eligibilityRationale  String
+  gradYearWindow        String
+  prestigeTier          String   // "TIER_1A", "TIER_1B", "TIER_2"
+  prestigeRationale     String
+  fitScore              Float
+  whyEmmettFits         String   // JSON string of array of 3 bullet points
+  fitRationale          String
+  trajectoryScore       Float
+  trajectoryRationale   String
+  returnOfferEstimate   String
+  mentorshipQuality     String
+  agentAuditLog         String   // JSON array of 5 agent step logs
+  evaluatedAt           DateTime @default(now())
+}
+
+model Application {
+  id                    String   @id @default(cuid())
+  jobId                 String   @unique
+  job                   Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  stage                 String   @default("DISCOVERED") // DISCOVERED, REVIEWING, TAILORING, APPLIED, INTERVIEWING, OFFER
+  priority              String   @default("HIGH")       // CRITICAL, HIGH, MEDIUM, LOW
+  notes                 String?
+  targetDeadline        String?
+  interviewDate         String?
+  tailoredCoverLetter   String?
+  tailoredResumeBullets String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model AlumniContact {
+  id               String   @id @default(cuid())
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name             String
+  role             String
+  gtDegree         String   // "Georgia Tech BS BA '23 (T&M), APM"
+  location         String   // "New York, NY", "San Francisco, CA"
+  linkedinUrl      String?
+  email            String?
+  connectionStatus String   @default("NOT_CONTACTED") // NOT_CONTACTED, OUTREACH_SENT, CONNECTED, CHATTED
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
