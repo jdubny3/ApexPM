@@ -9,14 +9,18 @@
     "lint": "next lint",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "seed": "npx tsx scripts/seed.ts"
+    "seed": "npx tsx scripts/seed.ts",
+    "worker": "tsx services/cron-worker/worker.ts",
+    "sync": "tsx -e 'import { syncSummer2027OpportunitiesWithGemini } from \"./lib/services/gemini-sourcing-service\"; syncSummer2027OpportunitiesWithGemini();'"
   },
   "dependencies": {
+    "@google/genai": "^2.21.0",
     "@prisma/client": "^5.20.0",
     "clsx": "^2.1.1",
     "framer-motion": "^11.11.8",
     "lucide-react": "^0.453.0",
     "next": "14.2.15",
+    "node-cron": "^4.6.0",
     "prisma": "^5.20.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -25,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.16.11",
+    "@types/node-cron": "^3.0.11",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",

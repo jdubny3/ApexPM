@@ -131,6 +131,60 @@ gcloud builds submit --config cloudbuild.yaml
 
 ---
 
+## 🤖 Daily Automated Ingestion Service (Powered by Gemini)
+
+ApexPM includes a dedicated daily background worker service that queries Google Gemini to surface newly posted Summer 2027 PM/APM undergraduate internships in NYC and the SF Bay Area.
+
+### How It Works:
+1. **Gemini Ingestion (`lib/services/gemini-sourcing-service.ts`)**:
+   - Queries Gemini with Emmett's profile (4.0 GPA, Business + CS Minor, Denning T&M, Finance Club Director).
+   - Extracts opportunities strictly for **Summer 2027** in **NYC** or **SF Bay Area** with direct ATS links.
+   - Formats opportunities into the exact database schema.
+2. **Multi-Agent Evaluation**:
+   - Automatically runs each discovered opportunity through the 5-agent evaluation fleet to compute the Apex Score and generate 3 custom Georgia Tech proof points.
+3. **Live ATS Verification**:
+   - Conducts an automated HTTP 200 health check against the application portal.
+4. **Database Upsert**:
+   - Atomically updates `Company`, `Job`, `AgentEvaluation`, `Application`, and `AlumniContact` in the database.
+
+### Running the Worker Container
+
+ApexPM includes `Dockerfile.worker` for running the automated worker service:
+
+```bash
+# Build the dedicated worker container
+docker build -t apexpm-worker -f Dockerfile.worker .
+
+# Run the container with your Gemini API key
+docker run -d -p 8080:8080 \
+  -e GEMINI_API_KEY="your-gemini-api-key" \
+  -e CRON_SCHEDULE="0 6 * * *" \
+  apexpm-worker
+```
+
+### Deploying the Worker to Google Cloud Run
+
+```bash
+# Deploy as a Cloud Run background service
+gcloud run deploy apexpm-worker \
+  --source . \
+  --dockerfile Dockerfile.worker \
+  --region us-central1 \
+  --set-env-vars GEMINI_API_KEY="your-gemini-api-key",CRON_SCHEDULE="0 6 * * *" \
+  --allow-unauthenticated
+```
+
+### Cloud Scheduler Daily Trigger (Alternative)
+
+You can also trigger daily updates directly on your primary web app via Google Cloud Scheduler:
+1. Go to **Google Cloud Scheduler** -> **Create Job**.
+2. Frequency: `0 6 * * *` (Daily at 6 AM).
+3. Target type: **HTTP**.
+4. URL: `https://[YOUR_CLOUD_RUN_URL]/api/cron/sync`
+5. HTTP Method: **POST**.
+
+---
+
 ## 📁 Repository Structure
 
 ```

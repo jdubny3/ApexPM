@@ -1,0 +1,34 @@
+# Dedicated Dockerfile for the ApexPM Gemini Daily Ingestion Worker Service
+FROM node:20-slim
+
+# Install OpenSSL (required by Prisma on Linux), CA certificates, and curl
+RUN apt-get update -y && apt-get install -y openssl ca-certificates curl && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Disable Next.js telemetry
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Copy package manifests first for optimal layer caching
+COPY package*.json ./
+COPY prisma ./prisma/
+
+# Install dependencies
+RUN npm install
+
+# Copy application source
+COPY . .
+
+# Generate Prisma Client for the Linux container
+RUN npx prisma generate
+
+# Set runtime environment variables
+ENV NODE_ENV=production
+ENV PORT=8080
+ENV HOSTNAME="0.0.0.0"
+
+# Cloud Run / HTTP port
+EXPOSE 8080
+
+# Launch the Gemini daily cron worker daemon
+CMD ["npx", "tsx", "services/cron-worker/worker.ts"]
