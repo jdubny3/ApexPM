@@ -1,7 +1,27 @@
 import http from "http";
+import fs from "fs";
+import path from "path";
 import cron from "node-cron";
 import { syncSummer2027OpportunitiesWithGemini } from "../../lib/services/gemini-sourcing-service";
 import { prisma } from "../../lib/prisma";
+
+// Load environment variables from .env or .env.local if present
+for (const envFile of [".env.local", ".env"]) {
+  const envPath = path.resolve(process.cwd(), envFile);
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
+        const [key, ...rest] = trimmed.split("=");
+        const value = rest.join("=").replace(/^["']|["']$/g, "");
+        if (!process.env[key.trim()]) {
+          process.env[key.trim()] = value.trim();
+        }
+      }
+    }
+  }
+}
 
 const PORT = parseInt(process.env.PORT || "8080", 10);
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE || "0 6 * * *"; // Daily at 6:00 AM UTC
