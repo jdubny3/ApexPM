@@ -6,15 +6,14 @@ RUN apt-get update -y && apt-get install -y openssl ca-certificates curl && rm -
 
 WORKDIR /app
 
-# Ensure devDependencies (TypeScript, Tailwind, Autoprefixer, PostCSS) are installed during build
-ENV NODE_ENV=development
+# Disable Next.js telemetry collection during build
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copy package manifests first for optimal layer caching
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Install ALL dependencies (including devDependencies required to compile Next.js)
+# Install ALL dependencies (including TypeScript, Tailwind, Autoprefixer, PostCSS)
 RUN npm install --include=dev
 
 # Copy application source
@@ -23,7 +22,7 @@ COPY . .
 # Generate Prisma Client for the Linux container environment
 RUN npx prisma generate
 
-# Build Next.js production bundle
+# Build Next.js production bundle (uses standard production build mode)
 RUN npm run build
 
 # Pre-seed SQLite database with 100% verified Summer 2027 NYC & SF Bay Area PM roles
