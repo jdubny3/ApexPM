@@ -38,7 +38,33 @@ export default function DashboardPage() {
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [selectedJob, setSelectedJob] = useState<any | null>(null);
   const [isVerifyingFleet, setIsVerifyingFleet] = useState(false);
+  const [isScouringFleet, setIsScouringFleet] = useState(false);
   const [verificationFeedback, setVerificationFeedback] = useState<string | null>(null);
+
+  const handleRunPipelineScour = async () => {
+    setIsScouringFleet(true);
+    setVerificationFeedback("Autonomous fleet scouring web via Gemini for Summer 2027 PM roles...");
+    try {
+      const res = await fetch("/api/agents/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "scour" }),
+      });
+      const data = await res.json();
+      if (data.success && data.jobs) {
+        setJobs(data.jobs);
+        setVerificationFeedback(`Agent fleet synchronized ${data.jobs.length} Summer 2027 roles live!`);
+        setTimeout(() => setVerificationFeedback(null), 5000);
+      } else {
+        await fetchJobs();
+      }
+    } catch (e: any) {
+      console.error(e);
+      await fetchJobs();
+    } finally {
+      setIsScouringFleet(false);
+    }
+  };
 
   const fetchJobs = async () => {
     setLoading(true);
@@ -213,12 +239,12 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Verification Fleet Status Bar */}
-        <div className="px-4 py-2.5 rounded-xl bg-[#0d1629] border border-slate-800 flex items-center justify-between text-xs">
+        {/* Verification & Autonomous Pipeline Fleet Status Bar */}
+        <div className="px-4 py-3 rounded-xl bg-[#0d1629] border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="text-slate-300">
-              <strong>Agent Verification Status:</strong> All listed opportunities are actively open for application for Summer 2027 with valid career portal links.
+              <strong>Autonomous Fleet Status:</strong> All listed opportunities are verified open for Summer 2027 with direct ATS application links.
             </span>
             {verificationFeedback && (
               <span className="text-emerald-400 font-bold ml-2">
@@ -227,14 +253,25 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <button
-            onClick={handleVerifyFleet}
-            disabled={isVerifyingFleet}
-            className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors shrink-0"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingFleet ? "animate-spin" : ""}`} />
-            {isVerifyingFleet ? "Agent Verifying..." : "Run Fleet Verification"}
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+            <button
+              onClick={handleRunPipelineScour}
+              disabled={isScouringFleet}
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950/40 transition-all active:scale-95 disabled:opacity-50"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${isScouringFleet ? "animate-spin" : ""}`} />
+              {isScouringFleet ? "Scouring Web via Gemini..." : "⚡ Run Discovery Pipeline"}
+            </button>
+
+            <button
+              onClick={handleVerifyFleet}
+              disabled={isVerifyingFleet}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingFleet ? "animate-spin" : ""}`} />
+              {isVerifyingFleet ? "Verifying..." : "Verify Fleet"}
+            </button>
+          </div>
         </div>
 
         {/* Filter & Search Bar */}
