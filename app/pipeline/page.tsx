@@ -117,14 +117,44 @@ export default function PipelinePage() {
   const [isSaved, setIsSaved] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
 
-  // Load existing jobs from database on mount
+  // Load existing jobs from database on mount with optimistic localStorage rehydration
   const fetchCurrentFleet = async () => {
     try {
-      setLoadingInitialJobs(true);
       const res = await fetch("/api/jobs");
       const data = await res.json();
       if (data.success && Array.isArray(data.jobs)) {
-        setDiscoveredJobs(data.jobs);
+        const serverJobs: any[] = data.jobs;
+
+        let mergedJobs = serverJobs;
+        try {
+          const cached = localStorage.getItem("apexpm_persisted_jobs_v2");
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const serverSlugSet = new Set(serverJobs.map((j: any) => j.slug));
+              const missingOnServer = parsed.filter((j: any) => j && j.slug && !serverSlugSet.has(j.slug));
+
+              if (missingOnServer.length > 0) {
+                console.log(`[ApexPM Pipeline] Rehydrating ${missingOnServer.length} locally persisted jobs to server...`);
+                mergedJobs = [...serverJobs, ...missingOnServer].sort((a, b) => (b.apexScore || 0) - (a.apexScore || 0));
+                fetch("/api/jobs/sync-client", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ jobs: missingOnServer }),
+                }).catch((err) => console.warn("Background rehydration error:", err));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Error reading cache:", e);
+        }
+
+        try {
+          localStorage.setItem("apexpm_persisted_jobs_v2", JSON.stringify(mergedJobs));
+        } catch (e) {
+          // ignore
+        }
+        setDiscoveredJobs(mergedJobs);
       }
     } catch (err) {
       console.error("Failed to fetch fleet jobs:", err);
@@ -134,6 +164,19 @@ export default function PipelinePage() {
   };
 
   useEffect(() => {
+    // Immediate optimistic load from localStorage
+    try {
+      const cached = localStorage.getItem("apexpm_persisted_jobs_v2");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setDiscoveredJobs(parsed);
+          setLoadingInitialJobs(false);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
     fetchCurrentFleet();
   }, []);
 
@@ -181,9 +224,29 @@ export default function PipelinePage() {
       if (data.success) {
         setFleetStage(6); // Completed
         const jobsList = data.jobs || [];
-        setDiscoveredJobs(jobsList);
+
+        // Strictly additive merge with previous jobs
+        setDiscoveredJobs((prev) => {
+          const jobMap = new Map<string, any>();
+          for (const j of prev) {
+            if (j && j.slug) jobMap.set(j.slug, j);
+          }
+          for (const j of jobsList) {
+            if (j && j.slug) jobMap.set(j.slug, j);
+          }
+          const updated = Array.from(jobMap.values()).sort(
+            (a, b) => (b.apexScore || 0) - (a.apexScore || 0)
+          );
+          try {
+            localStorage.setItem("apexpm_persisted_jobs_v2", JSON.stringify(updated));
+          } catch (e) {
+            // ignore
+          }
+          return updated;
+        });
+
         setFleetStatusMessage(
-          `✓ Fleet Execution Successful: Scoured and evaluated ${jobsList.length} Summer 2027 PM opportunities across NYC & SF Bay Area!`
+          `✓ Fleet Execution Successful: Scoured and evaluated ${jobsList.length} Summer 2027 PM opportunities saved permanently in database & local storage!`
         );
       } else {
         alert("Web-scour pipeline failed: " + (data.error || "Unknown error"));

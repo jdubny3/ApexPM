@@ -51,9 +51,28 @@ export default function DashboardPage() {
         body: JSON.stringify({ mode: "scour" }),
       });
       const data = await res.json();
-      if (data.success && data.jobs) {
-        setJobs(data.jobs);
-        setVerificationFeedback(`Agent fleet synchronized ${data.jobs.length} Summer 2027 roles live!`);
+      if (data.success && Array.isArray(data.jobs)) {
+        // Strictly additive merge: combine existing jobs with returned jobs by slug
+        setJobs((prevJobs) => {
+          const jobMap = new Map<string, any>();
+          for (const j of prevJobs) {
+            if (j && j.slug) jobMap.set(j.slug, j);
+          }
+          for (const j of data.jobs) {
+            if (j && j.slug) jobMap.set(j.slug, j);
+          }
+          const updatedList = Array.from(jobMap.values()).sort(
+            (a, b) => (b.apexScore || 0) - (a.apexScore || 0)
+          );
+          try {
+            localStorage.setItem("apexpm_persisted_jobs_v2", JSON.stringify(updatedList));
+          } catch (err) {
+            console.warn("Could not save to localStorage:", err);
+          }
+          return updatedList;
+        });
+
+        setVerificationFeedback(`✓ Permanent sync: ${data.jobs.length} Summer 2027 roles active and saved!`);
         setTimeout(() => setVerificationFeedback(null), 5000);
       } else {
         await fetchJobs();
@@ -67,12 +86,46 @@ export default function DashboardPage() {
   };
 
   const fetchJobs = async () => {
-    setLoading(true);
     try {
       const res = await fetch("/api/jobs");
       const data = await res.json();
-      if (data.success) {
-        setJobs(data.jobs);
+      if (data.success && Array.isArray(data.jobs)) {
+        const serverJobs: any[] = data.jobs;
+
+        // Check local storage for any client-side persisted jobs that server might lack
+        let mergedJobs = serverJobs;
+        try {
+          const cached = localStorage.getItem("apexpm_persisted_jobs_v2");
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const serverSlugSet = new Set(serverJobs.map((j: any) => j.slug));
+              const missingOnServer = parsed.filter((j: any) => j && j.slug && !serverSlugSet.has(j.slug));
+
+              if (missingOnServer.length > 0) {
+                console.log(`[ApexPM] Rehydrating ${missingOnServer.length} locally persisted jobs to server...`);
+                // Additive merge: keep locally discovered jobs visible
+                mergedJobs = [...serverJobs, ...missingOnServer].sort((a, b) => (b.apexScore || 0) - (a.apexScore || 0));
+
+                // Sync missing jobs back to server in background
+                fetch("/api/jobs/sync-client", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ jobs: missingOnServer }),
+                }).catch((err) => console.warn("Background rehydration error:", err));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Error reading cache:", e);
+        }
+
+        try {
+          localStorage.setItem("apexpm_persisted_jobs_v2", JSON.stringify(mergedJobs));
+        } catch (e) {
+          // ignore
+        }
+        setJobs(mergedJobs);
       }
     } catch (err) {
       console.error("Failed to load jobs:", err);
@@ -82,6 +135,19 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    // Immediate optimistic load from localStorage so user never sees reverted count
+    try {
+      const cached = localStorage.getItem("apexpm_persisted_jobs_v2");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setJobs(parsed);
+          setLoading(false);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
     fetchJobs();
   }, []);
 

@@ -3,6 +3,8 @@ import { prisma } from "../prisma";
 import { runAgentPipeline } from "../agents/orchestrator";
 import { verifyLiveOpportunity } from "../agents/live-verifier";
 import { EMMETT_PROFILE } from "../candidate-profile";
+import fs from "fs";
+import path from "path";
 
 export interface GeminiOpportunitySchema {
   companyName: string;
@@ -824,7 +826,40 @@ Return a JSON array of opportunity objects adhering strictly to this JSON format
   return [];
 }
 
-export async function syncSummer2027OpportunitiesWithGemini(): Promise<SyncReport> {
+const PERSISTED_JOBS_FILE = path.join(process.cwd(), "prisma", "persisted_discovered_jobs.json");
+
+export function loadPersistedJobs(): GeminiOpportunitySchema[] {
+  try {
+    if (fs.existsSync(PERSISTED_JOBS_FILE)) {
+      const data = fs.readFileSync(PERSISTED_JOBS_FILE, "utf-8");
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn("[Gemini Sourcing Service] Note: could not load persisted_discovered_jobs.json:", err);
+  }
+  return [];
+}
+
+export function savePersistedJobs(jobs: GeminiOpportunitySchema[]): void {
+  try {
+    const dir = path.dirname(PERSISTED_JOBS_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(PERSISTED_JOBS_FILE, JSON.stringify(jobs, null, 2), "utf-8");
+    console.log(`[Gemini Sourcing Service] Permanently saved ${jobs.length} roles to ${PERSISTED_JOBS_FILE}`);
+  } catch (err) {
+    console.warn("[Gemini Sourcing Service] Note: could not write to persisted_discovered_jobs.json:", err);
+  }
+}
+
+export async function syncSummer2027OpportunitiesWithGemini(options?: {
+  additionalRoles?: GeminiOpportunitySchema[];
+  skipLivePing?: boolean;
+}): Promise<SyncReport> {
   const timestamp = new Date().toISOString();
   console.log(`[Gemini Sourcing Service] Starting comprehensive Summer 2027 PM internship ingestion at ${timestamp}...`);
 
@@ -839,18 +874,86 @@ export async function syncSummer2027OpportunitiesWithGemini(): Promise<SyncRepor
     console.log("[Gemini Sourcing Service] No GEMINI_API_KEY detected in environment. Using verified high-conviction curated roles.");
   }
 
-  // Combine curated high-conviction roster with any live-discovered roles, deduplicating by jobSlug or company+title
+  // 1. Curated baseline roster
   const combinedMap = new Map<string, GeminiOpportunitySchema>();
   for (const role of VERIFIED_SUMMER_2027_ROSTER) {
     combinedMap.set(role.jobSlug, role);
   }
+
+  // 2. Add persisted roles from disk JSON file
+  const persistedDiskJobs = loadPersistedJobs();
+  for (const role of persistedDiskJobs) {
+    if (role && role.jobSlug) {
+      combinedMap.set(role.jobSlug, role);
+    }
+  }
+
+  // 3. Add existing database roles from SQLite (additive preservation)
+  try {
+    const existingDbJobs = await prisma.job.findMany({
+      include: {
+        company: {
+          include: { alumni: true }
+        }
+      }
+    });
+    for (const dbJob of existingDbJobs) {
+      if (!combinedMap.has(dbJob.slug)) {
+        combinedMap.set(dbJob.slug, {
+          companyName: dbJob.company.name,
+          companySlug: dbJob.company.slug,
+          tier: dbJob.company.tier as any,
+          tierLabel: dbJob.company.tierLabel,
+          hqLocation: dbJob.company.hqLocation,
+          aiFocus: dbJob.company.aiFocus,
+          companySize: dbJob.company.companySize,
+          techStack: dbJob.company.techStack,
+          apmProgramSummary: dbJob.company.apmProgramSummary,
+          websiteUrl: dbJob.company.websiteUrl,
+          title: dbJob.title,
+          jobSlug: dbJob.slug,
+          location: dbJob.location,
+          locationTier: dbJob.locationTier as any,
+          stipend: dbJob.stipend || "",
+          team: dbJob.team || "",
+          workplaceType: dbJob.workplaceType as any,
+          deadline: dbJob.deadline || "",
+          url: dbJob.url,
+          source: dbJob.source || "Database Sync",
+          description: dbJob.description,
+          requirements: dbJob.requirements,
+          alumni: dbJob.company.alumni.map(a => ({
+            name: a.name,
+            role: a.role,
+            gtDegree: a.gtDegree,
+            location: a.location,
+            linkedinUrl: a.linkedinUrl || undefined,
+            email: a.email || undefined
+          }))
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[Gemini Sourcing Service] Note: Could not query existing database jobs:", err);
+  }
+
+  // 4. Add client provided additional roles (e.g. from browser rehydration)
+  if (options?.additionalRoles && options.additionalRoles.length > 0) {
+    for (const role of options.additionalRoles) {
+      if (role && role.jobSlug) {
+        combinedMap.set(role.jobSlug, role);
+      }
+    }
+  }
+
+  // 5. Add live discovered roles from Gemini
   for (const role of liveDiscovered) {
     const key = role.jobSlug || `${role.companyName}-${role.title}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     combinedMap.set(key, role);
   }
 
   const opportunities = Array.from(combinedMap.values());
-  console.log(`[Gemini Sourcing Service] Evaluating full fleet of ${opportunities.length} Summer 2027 opportunities across NYC & SF Bay Area...`);
+  console.log(`[Gemini Sourcing Service] Evaluating full fleet of ${opportunities.length} Summer 2027 opportunities across NYC & SF Bay Area (Additive Mode)...`);
 
   let newRolesCount = 0;
   let updatedRolesCount = 0;
@@ -890,13 +993,15 @@ export async function syncSummer2027OpportunitiesWithGemini(): Promise<SyncRepor
 
     // 3. Live ATS Verification Health Check
     let verifiedUrl = opp.url;
-    try {
-      const liveCheck = await verifyLiveOpportunity(opp.url);
-      if (liveCheck.isLive) {
-        console.log(`✓ [Live Verifier] Confirmed active ATS application at ${opp.companyName} (HTTP ${liveCheck.httpStatus})`);
+    if (!options?.skipLivePing) {
+      try {
+        const liveCheck = await verifyLiveOpportunity(opp.url);
+        if (liveCheck.isLive) {
+          console.log(`✓ [Live Verifier] Confirmed active ATS application at ${opp.companyName} (HTTP ${liveCheck.httpStatus})`);
+        }
+      } catch {
+        // Keep verified URL
       }
-    } catch {
-      // Keep verified URL
     }
 
     // 4. Database Upsert: Company
@@ -1079,6 +1184,9 @@ export async function syncSummer2027OpportunitiesWithGemini(): Promise<SyncRepor
     message: `Successfully synchronized ${totalEvaluated} Summer 2027 PM opportunities (${newRolesCount} new, ${updatedRolesCount} updated).`,
     syncedJobs: syncedJobs.sort((a, b) => b.apexScore - a.apexScore)
   };
+
+  // Permanently save full additive opportunity set to JSON file
+  savePersistedJobs(opportunities);
 
   console.log(`[Gemini Sourcing Service] Sync completed: ${report.message}`);
   return report;

@@ -8,6 +8,8 @@ if [ ! -f /app/prisma/dev.db ] || [ ! -s /app/prisma/dev.db ]; then
   npx tsx scripts/seed.ts
 else
   echo "=> SQLite database found with verified Summer 2027 opportunities."
+  # Additively ensure all 20+ verified opportunities are present
+  npx tsx scripts/seed.ts
 fi
 
 # Execute CMD passed from Dockerfile
